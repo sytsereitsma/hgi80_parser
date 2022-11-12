@@ -15,11 +15,14 @@ pub struct ZoneTemp {
 impl PayloadFrom for ZoneTemp {
     type PayloadType = Self;
     fn from_payload(data: &str) -> Result<Self::PayloadType> {
-        let centi_degrees =
-            i32::from_str_radix(&data[0..6], 16).with_context(|| "Invalid zone temperature")?;
-        Ok(ZoneTemp {
-            temperature: centi_degrees as f32 / 100.0,
-        })
+        match i32::from_str_radix(&data[0..6], 16) {
+            Ok(centi_degrees) => {
+                Ok(ZoneTemp {
+                    temperature: centi_degrees as f32 / 100.0,
+                })
+            },
+            Err(e) => Err(e).with_context(|| format!("Invalid zone temperature {}", data)),
+        }
     }
 }
 

@@ -17,17 +17,18 @@ fn main() {
                 match parse_packet(&line.as_str()) {
                     Ok(packet) => {
                         if let Some(Payload::ZoneTemp(zt)) = packet.payload {
-                            println!("Temperature {} = {}", &packet.id[0], zt.temperature);
+                            println!("Temperature {:?}", zt.temperatures);
                         }
                     }
-                    Err(_e) => {
-                        //eprintln!("Error parsing line ({})", e);
-                        //eprintln!("With line '{}'", line);
+                    Err(e) => {
+                        eprintln!("Error parsing line ({})", e);
+                        eprintln!("  With line '{}'", line);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Error reading from serial port ({})", e);
+                // Most likely a USB disconnect, restart
+                panic!("Error reading from serial port ({})", e);
             }
         }
     }

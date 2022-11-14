@@ -1,6 +1,7 @@
 extern crate num;
 #[macro_use]
 extern crate num_derive;
+use std::collections::HashMap;
 use anyhow::{bail, format_err, Context, Result};
 
 trait PayloadFrom {
@@ -9,20 +10,28 @@ trait PayloadFrom {
 }
 
 pub struct ZoneTemp {
-    pub temperature: f32,
+    pub temperatures: HashMap<u8,f32>,
 }
 
 impl PayloadFrom for ZoneTemp {
     type PayloadType = Self;
     fn from_payload(data: &str) -> Result<Self::PayloadType> {
-        match i32::from_str_radix(&data[0..6], 16) {
-            Ok(centi_degrees) => {
-                Ok(ZoneTemp {
-                    temperature: centi_degrees as f32 / 100.0,
-                })
-            },
-            Err(e) => Err(e).with_context(|| format!("Invalid zone temperature {}", data)),
+        //045  I --- 01:073979 --:------ 01:073979 30C9 024 0007070106CE0206C70307320405FB05070F06064D070789
+        if (data.len() % 6) != 0 {
+            bail!("Zone temperature payload should be a multiple of 6 characters (payload {})", data);
         }
+
+        let mut temperatures: HashMap<u8, f32> = HashMap::new();
+        // It can be any number of id, temperature pairs
+        for i in (0..data.len()).step_by(6) {
+            let id = u8::from_str_radix(&data[i..i+2], 16).with_context(|| format!("Invalid zone ID in '{}' (i={})", data, i))?;
+            let centi_degrees = i32::from_str_radix(&data[i + 2..i+6], 16).with_context(|| format!("Invalid zone temperature in '{}' (i={})", data, i))?;
+            temperatures.insert(id, centi_degrees as f32 / 100.0);
+        }
+
+        Ok(ZoneTemp {
+            temperatures: temperatures,
+        })
     }
 }
 
@@ -70,20 +79,18 @@ pub enum Payload {
 }
 
 pub struct Packet {
-    pub flags: u16,
+    pub rssi: u16,
     pub packet_type: PacketType,
     pub command: Command,
-    pub id: [String; 3],
     pub payload: Option<Payload>,
 }
 
 impl Packet {
     fn new() -> Self {
         Self {
-            flags: 0,
+            rssi: 0,
             packet_type: PacketType::Unknown,
             command: Command::Unknown,
-            id: Default::default(), 
             payload: None,
         }
     }
@@ -128,7 +135,7 @@ fn parse_command(data: &str) -> Result<Command> {
     };
 
     if let Command::Unknown = cmd {
-        bail!("Unknow command {}", data);
+        bail!("Unknown command {}", data);
     }
 
     Ok(cmd)
@@ -155,33 +162,83 @@ pub fn parse_packet(data: &str) -> Result<Packet> {
         bail!("Column count should be {}", EXPECTED_COLUMNS);
     }
 
+    //Check payload size (2 chars per byte)
+    let payload_chars = 2 * usize::from_str_radix(columns[7], 10)
+        .with_context(|| "While parsing the payload size")?;
+    if payload_chars != columns[8].len() {
+        bail!("Payload size does not match, expected {} chars, got {}", payload_chars, columns[8].len());
+    } 
+
     let mut packet = Packet::new();
-    packet.flags = u16::from_str_radix(columns[0], 16)
-        .with_context(|| "While pasring the flags (column 0)")?;
+    packet.rssi = u16::from_str_radix(columns[0], 10)
+        .with_context(|| format!("While parsing the rssi (column 0) {}", columns[0]))?;
     packet.packet_type = parse_packet_type(columns[1])?;
     packet.command = parse_command(columns[6])?;
-    packet.id[0] = String::from(columns[3]);
-    packet.id[1] = String::from(columns[4]);
-    packet.id[2] = String::from(columns[5]);
     packet.payload = Some(parse_payload(&packet.command, columns[8])?);
+
     Ok(packet)
 }
 
 #[cfg(test)]
-mod tests {
+mod line_parsing_tests {
     use super::*;
+
+    #[test]
+    fn parse_too_few_colums() {
+        assert!(parse_packet("").is_err());
+        assert!(parse_packet("1 2 3 4 5 6 7 8 ").is_err());
+    }
+
+    #[test]
+    fn parse_payload_length_mismatch() {
+        // Note that payload refers to decoded bytes (two payload characters form a byte)
+        // 1 char short 
+        assert!(parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 006 00070203081").is_err());
+
+        // 1 char oversize 
+        assert!(parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 006 000702030814A").is_err());
+    }
 
     #[test]
     fn parse_zonetemp() {
         let packet =
-            parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 003 000702").unwrap();
+            parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 006 000702030814").unwrap();
         if let Some(Payload::ZoneTemp(zt)) = packet.payload {
-            assert_eq!(zt.temperature, 17.94);
-            assert_eq!(packet.id[0], "04:143260");
-            assert_eq!(packet.id[1], "--:------");
-            assert_eq!(packet.id[2], "04:143260");
+            assert_eq!(zt.temperatures.len(), 2);
+            assert_eq!(zt.temperatures[&0u8], 17.94);
+            assert_eq!(zt.temperatures[&3u8], 20.68);
         } else {
             assert!(false);
         }
+    }
+}
+
+#[cfg(test)]
+mod zone_temp_tests {
+    use super::*;
+
+    #[test]
+    fn parse_zonetemp() {
+        assert_eq!(ZoneTemp::from_payload("030702010814").unwrap().temperatures, HashMap::from([
+            (3u8, 17.94),
+            (1u8, 20.68),
+        ]));
+
+        assert_eq!(ZoneTemp::from_payload("040702").unwrap().temperatures, HashMap::from([
+            (4u8, 17.94),
+        ]));
+
+        assert_eq!(ZoneTemp::from_payload("").unwrap().temperatures, HashMap::new());
+    }
+
+    #[test]
+    fn parse_zonetemp_errors() {
+        // Not multiples of 6 chars
+        assert!(ZoneTemp::from_payload("01").is_err());
+        assert!(ZoneTemp::from_payload("01020").is_err());
+
+        // Non-hex characters
+        assert!(ZoneTemp::from_payload("1234X6").is_err());
+        assert!(ZoneTemp::from_payload("1X3456").is_err());
     }
 }

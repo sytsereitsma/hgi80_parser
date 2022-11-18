@@ -157,9 +157,11 @@ fn parse_payload(command: &Command, data: &str) -> Result<Payload> {
 pub fn parse_packet(data: &str) -> Result<Packet> {
     const EXPECTED_COLUMNS: usize = 9;
 
-    let columns: Vec<&str> = data.split_ascii_whitespace().collect();
+    // Non ascii characters appear between the sentences, Filter these.
+    let filtered: String = data.chars().filter(|c| !c.is_ascii_control()).collect(); 
+    let columns: Vec<&str> = filtered.split_ascii_whitespace().collect();
     if columns.len() != EXPECTED_COLUMNS {
-        bail!("Column count should be {}", EXPECTED_COLUMNS);
+        bail!("Column count should be {} '{}'", EXPECTED_COLUMNS, filtered);
     }
 
     //Check payload size (2 chars per byte)
@@ -171,7 +173,7 @@ pub fn parse_packet(data: &str) -> Result<Packet> {
 
     let mut packet = Packet::new();
     packet.rssi = u16::from_str_radix(columns[0], 10)
-        .with_context(|| format!("While parsing the rssi (column 0) {}", columns[0]))?;
+        .with_context(|| format!("While parsing the rssi (column 0) '{}' {:?}", columns[0], columns[0].as_bytes()))?;
     packet.packet_type = parse_packet_type(columns[1])?;
     packet.command = parse_command(columns[6])?;
     packet.payload = Some(parse_payload(&packet.command, columns[8])?);
@@ -211,6 +213,15 @@ mod line_parsing_tests {
             assert!(false);
         }
     }
+
+    #[test]
+    fn weird_rssi_parsing_error() {
+        let packet =
+            //parse_packet("045 RQ --- 30:249816 10:050387 --:------ 3EF0 001 00\n").unwrap();
+            parse_packet("045 RQ --- 30:249816 10:050387 --:------ 3EF0 001 00\n").unwrap();
+            assert_eq!(packet.rssi, 45);
+    }
+
 }
 
 #[cfg(test)]

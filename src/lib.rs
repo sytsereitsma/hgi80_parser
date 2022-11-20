@@ -1,8 +1,8 @@
 extern crate num;
 #[macro_use]
 extern crate num_derive;
-use std::collections::HashMap;
 use anyhow::{bail, format_err, Context, Result};
+use std::collections::HashMap;
 
 trait PayloadFrom {
     type PayloadType;
@@ -10,7 +10,7 @@ trait PayloadFrom {
 }
 
 pub struct ZoneTemp {
-    pub temperatures: HashMap<u8,f32>,
+    pub temperatures: HashMap<u8, f32>,
 }
 
 impl PayloadFrom for ZoneTemp {
@@ -18,20 +18,23 @@ impl PayloadFrom for ZoneTemp {
     fn from_payload(data: &str) -> Result<Self::PayloadType> {
         //045  I --- 01:073979 --:------ 01:073979 30C9 024 0007070106CE0206C70307320405FB05070F06064D070789
         if (data.len() % 6) != 0 {
-            bail!("Zone temperature payload should be a multiple of 6 characters (payload {})", data);
+            bail!(
+                "Zone temperature payload should be a multiple of 6 characters (payload {})",
+                data
+            );
         }
 
         let mut temperatures: HashMap<u8, f32> = HashMap::new();
         // It can be any number of id, temperature pairs
         for i in (0..data.len()).step_by(6) {
-            let id = u8::from_str_radix(&data[i..i+2], 16).with_context(|| format!("Invalid zone ID in '{}' (i={})", data, i))?;
-            let centi_degrees = i32::from_str_radix(&data[i + 2..i+6], 16).with_context(|| format!("Invalid zone temperature in '{}' (i={})", data, i))?;
+            let id = u8::from_str_radix(&data[i..i + 2], 16)
+                .with_context(|| format!("Invalid zone ID in '{}' (i={})", data, i))?;
+            let centi_degrees = i32::from_str_radix(&data[i + 2..i + 6], 16)
+                .with_context(|| format!("Invalid zone temperature in '{}' (i={})", data, i))?;
             temperatures.insert(id, centi_degrees as f32 / 100.0);
         }
 
-        Ok(ZoneTemp {
-            temperatures: temperatures,
-        })
+        Ok(ZoneTemp { temperatures })
     }
 }
 
@@ -158,22 +161,32 @@ pub fn parse_packet(data: &str) -> Result<Packet> {
     const EXPECTED_COLUMNS: usize = 9;
 
     // Non ascii characters appear between the sentences, Filter these.
-    let filtered: String = data.chars().filter(|c| !c.is_ascii_control()).collect(); 
+    let filtered: String = data.chars().filter(|c| !c.is_ascii_control()).collect();
     let columns: Vec<&str> = filtered.split_ascii_whitespace().collect();
     if columns.len() != EXPECTED_COLUMNS {
         bail!("Column count should be {} '{}'", EXPECTED_COLUMNS, filtered);
     }
 
     //Check payload size (2 chars per byte)
-    let payload_chars = 2 * usize::from_str_radix(columns[7], 10)
+    let payload_chars = 2 * columns[7]
+        .parse::<usize>()
         .with_context(|| "While parsing the payload size")?;
     if payload_chars != columns[8].len() {
-        bail!("Payload size does not match, expected {} chars, got {}", payload_chars, columns[8].len());
-    } 
+        bail!(
+            "Payload size does not match, expected {} chars, got {}",
+            payload_chars,
+            columns[8].len()
+        );
+    }
 
     let mut packet = Packet::new();
-    packet.rssi = u16::from_str_radix(columns[0], 10)
-        .with_context(|| format!("While parsing the rssi (column 0) '{}' {:?}", columns[0], columns[0].as_bytes()))?;
+    packet.rssi = columns[0].parse::<u16>().with_context(|| {
+        format!(
+            "While parsing the rssi (column 0) '{}' {:?}",
+            columns[0],
+            columns[0].as_bytes()
+        )
+    })?;
     packet.packet_type = parse_packet_type(columns[1])?;
     packet.command = parse_command(columns[6])?;
     packet.payload = Some(parse_payload(&packet.command, columns[8])?);
@@ -194,11 +207,16 @@ mod line_parsing_tests {
     #[test]
     fn parse_payload_length_mismatch() {
         // Note that payload refers to decoded bytes (two payload characters form a byte)
-        // 1 char short 
-        assert!(parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 006 00070203081").is_err());
+        // 1 char short
+        assert!(
+            parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 006 00070203081").is_err()
+        );
 
-        // 1 char oversize 
-        assert!(parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 006 000702030814A").is_err());
+        // 1 char oversize
+        assert!(
+            parse_packet("063  I --- 04:143260 --:------ 04:143260 30C9 006 000702030814A")
+                .is_err()
+        );
     }
 
     #[test]
@@ -215,13 +233,16 @@ mod line_parsing_tests {
     }
 
     #[test]
-    fn weird_rssi_parsing_error() {
-        let packet =
-            //parse_packet("045 RQ --- 30:249816 10:050387 --:------ 3EF0 001 00\n").unwrap();
-            parse_packet("045 RQ --- 30:249816 10:050387 --:------ 3EF0 001 00\n").unwrap();
-            assert_eq!(packet.rssi, 45);
+    fn invalid_characters_are_filtered_out() {
+        // Non readable ASCII characters are output by the HGI80 quite often
+        let packet = parse_packet(
+            "\x11\x11095  I --- 04:112669 --:------ 04:112669 30C9 003 0006E1\x11\x11\n",
+        )
+        .unwrap();
+        // The unwrap should do it, but test the RSSI, the parsing of which put me
+        // on the trail of the bogus data
+        assert_eq!(packet.rssi, 95);
     }
-
 }
 
 #[cfg(test)]
@@ -230,16 +251,20 @@ mod zone_temp_tests {
 
     #[test]
     fn parse_zonetemp() {
-        assert_eq!(ZoneTemp::from_payload("030702010814").unwrap().temperatures, HashMap::from([
-            (3u8, 17.94),
-            (1u8, 20.68),
-        ]));
+        assert_eq!(
+            ZoneTemp::from_payload("030702010814").unwrap().temperatures,
+            HashMap::from([(3u8, 17.94), (1u8, 20.68),])
+        );
 
-        assert_eq!(ZoneTemp::from_payload("040702").unwrap().temperatures, HashMap::from([
-            (4u8, 17.94),
-        ]));
+        assert_eq!(
+            ZoneTemp::from_payload("040702").unwrap().temperatures,
+            HashMap::from([(4u8, 17.94),])
+        );
 
-        assert_eq!(ZoneTemp::from_payload("").unwrap().temperatures, HashMap::new());
+        assert_eq!(
+            ZoneTemp::from_payload("").unwrap().temperatures,
+            HashMap::new()
+        );
     }
 
     #[test]

@@ -5,6 +5,20 @@ use std::io::BufReader;
 use std::time::Duration;
 use hgi80_decoder::{parse_packet, Payload};
 use std::collections::HashMap;
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+   /// Full URL string of endpoit to send the data to
+   #[arg(short, long)]
+   endpoint: String,
+
+   /// Namme of USB device to connect to
+   #[arg(short, long)]
+   usb: String,
+}
 
 fn post_temperature_data(endpoint: &str, data: &HashMap<u8, f32>) {
     let mut payload: String = String::from("[");
@@ -32,7 +46,9 @@ fn post_temperature_data(endpoint: &str, data: &HashMap<u8, f32>) {
 }
 
 fn main() {
-    let serial_port = serialport::new("/dev/ttyUSB0", 115200)
+    let args = Args::parse();
+    
+    let serial_port = serialport::new(&args.usb, 115200)
         .timeout(Duration::from_millis(2000))
         .open()
         .expect("Failed to open port");
@@ -45,7 +61,7 @@ fn main() {
                 match parse_packet(&line.as_str()) {
                     Ok(packet) => {
                         if let Some(Payload::ZoneTemp(zt)) = packet.payload {
-                            post_temperature_data("http://xxxx", &zt.temperatures);
+                            post_temperature_data(&args.endpoint, &zt.temperatures);
                             println!("Temperature {:?}", zt.temperatures);
                         }
                     }

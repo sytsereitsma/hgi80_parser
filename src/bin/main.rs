@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::time::Duration;
+use std::fs::OpenOptions;
+use std::io::prelude::*;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -46,6 +48,13 @@ fn post_temperature_data(endpoint: &str, data: &HashMap<u8, f32>) {
 
 fn main() {
     let args = Args::parse();
+    
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("evohome_temps.txt")
+        .unwrap();
 
     let serial_port = serialport::new(&args.usb, 115200)
         .timeout(Duration::from_millis(2000))
@@ -60,12 +69,16 @@ fn main() {
                 Ok(packet) => {
                     if let Some(Payload::ZoneTemp(zt)) = packet.payload {
                         post_temperature_data(&args.endpoint, &zt.temperatures);
+
                         println!("Temperature {:?}", zt.temperatures);
+                        if let Err(e) = writeln!(file, "{}", line.as_str()) {
+                            eprintln!("Couldn't write to file: {}", e);
+                        }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error parsing line ({:#})", e);
-                    eprintln!("  With line '{}'", line);
+                    //eprintln!("Error parsing line ({:#})", e);
+                    //eprintln!("  With line '{}'", line);
                 }
             },
             Err(e) => {

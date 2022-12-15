@@ -5,6 +5,21 @@ use std::io::BufReader;
 use std::time::Duration;
 use hgi80_decoder::{parse_packet, Payload};
 use std::collections::HashMap;
+use clap::{arg, Parser};
+
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Settings
+{
+    /// Name of the serial port device to open
+    #[arg(short, long)]
+    port: String,
+
+    /// Name of the endpoint to publish to
+    #[arg(short, long)]
+    endpoint: String,
+}
 
 fn post_temperature_data(endpoint: &str, data: &HashMap<u8, f32>) {
     let mut payload: String = String::from("[");
@@ -32,7 +47,9 @@ fn post_temperature_data(endpoint: &str, data: &HashMap<u8, f32>) {
 }
 
 fn main() {
-    let serial_port = serialport::new("/dev/ttyUSB0", 115200)
+    let settings = Settings::parse();
+
+    let serial_port = serialport::new(&settings.port, 115200)
         .timeout(Duration::from_millis(2000))
         .open()
         .expect("Failed to open port");
@@ -45,7 +62,7 @@ fn main() {
                 match parse_packet(&line.as_str()) {
                     Ok(packet) => {
                         if let Some(Payload::ZoneTemp(zt)) = packet.payload {
-                            post_temperature_data("http://xxxx", &zt.temperatures);
+                            post_temperature_data(&settings.endpoint, &zt.temperatures);
                             println!("Temperature {:?}", zt.temperatures);
                         }
                     }

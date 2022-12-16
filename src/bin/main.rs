@@ -67,12 +67,15 @@ fn main() {
         match reader.read_line(&mut line) {
             Ok(_bytes) => match parse_packet(line.as_str()) {
                 Ok(packet) => {
-                    if let Some(Payload::ZoneTemp(zt)) = packet.payload {
-                        post_temperature_data(&args.endpoint, &zt.temperatures);
+                    // Packets with an RSSI higher than 80 usually have lots of bit errors
+                    if packet.rssi < 80 { 
+                        if let Some(Payload::ZoneTemp(zt)) = packet.payload {
+                            post_temperature_data(&args.endpoint, &zt.temperatures);
 
-                        println!("Temperature {:?}", zt.temperatures);
-                        if let Err(e) = writeln!(file, "{}", line.as_str()) {
-                            eprintln!("Couldn't write to file: {}", e);
+                            println!("Temperature {:?}", zt.temperatures);
+                            if let Err(e) = writeln!(file, "{}", line.as_str()) {
+                                eprintln!("Couldn't write to file: {}", e);
+                            }
                         }
                     }
                 }

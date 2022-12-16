@@ -76,14 +76,16 @@ fn main() {
                         }
                     }
                 }
-                Err(e) => {
+                Err(_e) => {
                     //eprintln!("Error parsing line ({:#})", e);
                     //eprintln!("  With line '{}'", line);
                 }
             },
             Err(e) => {
-                // Most likely a USB disconnect, restart
-                panic!("Error reading from serial port ({:#})", e);
+                match e.kind() {
+                    std::io::ErrorKind::TimedOut => eprintln!("Error reading from serial port ({:#})", e),
+                    _ => panic!("Error reading from serial port ({:#})", e),
+                }
             }
         }
     }

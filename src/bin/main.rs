@@ -46,21 +46,8 @@ fn post_temperature_data(endpoint: &str, data: &HashMap<u8, f32>) {
     }
 }
 
-fn main() {
-    let args = Args::parse();
-    
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open("evohome_temps.txt")
-        .unwrap();
-
-    let serial_port = serialport::new(&args.usb, 115200)
-        .timeout(Duration::from_millis(2000))
-        .open()
-        .expect("Failed to open port");
-
+fn evohome_loop(port: &str, endpoint: &str)
+{
     let mut reader = BufReader::new(serial_port);
     loop {
         let mut line = String::new();
@@ -92,4 +79,21 @@ fn main() {
             }
         }
     }
+}
+
+fn main() {
+    let args = Args::parse();
+    
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("evohome_temps.txt")
+        .unwrap();
+
+    let serial_port = serialport::new(&args.usb, 115200)
+        .timeout(Duration::from_millis(2000))
+        .open()
+        .expect("Failed to open port");
+
 }
